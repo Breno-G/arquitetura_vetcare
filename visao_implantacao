@@ -1,0 +1,75 @@
+@startuml
+title Diagrama de Implantação - Sistema VetCare (SaaS Franquias)
+
+left to right direction
+
+skinparam node {
+    BackgroundColor White
+    BorderColor Black
+}
+
+' --- Nível de Cliente ---
+node "Dispositivo do Tutor" as tutorDevice <<Smartphone>> {
+    artifact "VetCare Mobile App" as tutorApp <<Mobile App>>
+}
+
+node "Dispositivo da Clínica (Veterinário/Adm)" as vetDevice <<Desktop/Laptop>> {
+    artifact "VetCare Web Portal (SPA)" as vetSPA <<Web Browser>>
+}
+
+' --- Rede ---
+cloud "Internet (HTTPS)" as internet
+
+' --- Provedor de Nuvem ---
+node "Nuvem (Cloud Provider)" {
+
+    node "Load Balancer" as lb <<Ingress>> {
+        note right: Distribui tráfego para as\ninstâncias stateless
+    }
+
+    node "Cluster de Aplicação (Docker)" as appCluster {
+        node "App Instance 1 (Stateless)" as app1 {
+            artifact "VetCare Monólito Modular" as jar1 <<Service>>
+        }
+        node "App Instance 2 (Stateless)" as app2 {
+            artifact "VetCare Monólito Modular" as jar2 <<Service>>
+        }
+    }
+
+    node "Camada de Persistência" {
+        node "Servidor BD Principal" as primaryDB <<PostgreSQL 16>> {
+            database "VetCare_DB (Escrita/Leitura)"
+        }
+        node "Servidor BD Réplica" as replicaDB <<PostgreSQL 16>> {
+            database "VetCare_DB (Somente Leitura)"
+            note bottom: Suporta Relatórios e Dashboards\nsem onerar a escrita
+        }
+    }
+
+    node "Serviços de Mídia e Conteúdo" {
+        node "Object Storage (Bucket)" as s3 <<AWS S3 / similar>> {
+            artifact "Mídias (Fotos/Vídeos)"
+            artifact "Documentos (PDFs)"
+        }
+        node "CDN" as cdn <<Edge Locations>> {
+            note right: Cache de mídias para\ncarregamento ágil (RNF-004)
+        }
+    }
+}
+
+' --- Interconexões ---
+tutorDevice -- internet
+vetDevice -- internet
+internet -- lb
+
+lb -- appCluster : HTTP/JSON (REST)
+
+appCluster -- primaryDB : JDBC (Escrita/Leitura)
+appCluster -- replicaDB : JDBC (Leitura de Dashboards)
+
+appCluster -- s3 : Upload/Download (API)
+cdn -- internet : Entrega otimizada de mídias
+
+primaryDB .[#blue].> replicaDB : Replicação Síncrona
+
+@enduml
