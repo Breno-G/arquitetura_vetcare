@@ -1,75 +1,72 @@
 @startuml
-title Diagrama de Implantação - Sistema VetCare (SaaS Franquias)
-
-left to right direction
+title Diagrama de Implantação - Sistema VetCare
 
 skinparam node {
     BackgroundColor White
     BorderColor Black
 }
 
-' --- Nível de Cliente ---
-node "Dispositivo do Tutor" as tutorDevice <<Smartphone>> {
-    artifact "VetCare Mobile App" as tutorApp <<Mobile App>>
+' --- Camada de Dispositivos (Clientes) ---
+node "Dispositivo do Tutor" <<Smartphone>> as tutorNode {
+    artifact "VetCare App (View)" <<Mobile SPA>> as tutorArtifact
 }
 
-node "Dispositivo da Clínica (Veterinário/Adm)" as vetDevice <<Desktop/Laptop>> {
-    artifact "VetCare Web Portal (SPA)" as vetSPA <<Web Browser>>
+node "Dispositivo da Clínica" <<PC / Laptop>> as vetNode {
+    artifact "Portal Web (View)" <<Web SPA>> as vetArtifact
 }
 
 ' --- Rede ---
-cloud "Internet (HTTPS)" as internet
+cloud "Internet" as internet {
+    queue "HTTPS / TLS 1.3" as https
+}
 
-' --- Provedor de Nuvem ---
-node "Nuvem (Cloud Provider)" {
+' --- Infraestrutura em Nuvem ---
+node "Nuvem (Cloud Provider)" as cloudNode {
 
-    node "Load Balancer" as lb <<Ingress>> {
-        note right: Distribui tráfego para as\ninstâncias stateless
+    node "Load Balancer" <<Nginx / Ingress>> as lb {
+        note right: Distribui tráfego e gerencia\nterminação SSL
     }
 
-    node "Cluster de Aplicação (Docker)" as appCluster {
-        node "App Instance 1 (Stateless)" as app1 {
-            artifact "VetCare Monólito Modular" as jar1 <<Service>>
+    node "Cluster de Aplicação (Docker)" as cluster {
+        node "App Container 1" <<Docker>> as c1 {
+            artifact "Backend API (Controller/Model)" <<JAR/Spring Boot>> as api1
         }
-        node "App Instance 2 (Stateless)" as app2 {
-            artifact "VetCare Monólito Modular" as jar2 <<Service>>
+        node "App Container 2" <<Docker>> as c2 {
+            artifact "Backend API (Controller/Model)" <<JAR/Spring Boot>> as api2
+        }
+        note bottom: Backend Stateless permite\nescalabilidade horizontal
+    }
+
+    node "Cluster de Banco de Dados" as dbCluster {
+        node "Servidor Principal" <<PostgreSQL 16>> as dbPrimary {
+            database "VetCare_DB" as sqlPrimary
+        }
+        node "Réplica de Leitura" <<PostgreSQL 16>> as dbReplica {
+            database "VetCare_DB_Copy" as sqlReplica
         }
     }
 
-    node "Camada de Persistência" {
-        node "Servidor BD Principal" as primaryDB <<PostgreSQL 16>> {
-            database "VetCare_DB (Escrita/Leitura)"
+    node "Storage & Entrega" as storageNode {
+        node "Object Storage" <<S3 / similar>> as s3 {
+            artifact "Mídias e Documentos" <<Blob>> as media
         }
-        node "Servidor BD Réplica" as replicaDB <<PostgreSQL 16>> {
-            database "VetCare_DB (Somente Leitura)"
-            note bottom: Suporta Relatórios e Dashboards\nsem onerar a escrita
-        }
-    }
-
-    node "Serviços de Mídia e Conteúdo" {
-        node "Object Storage (Bucket)" as s3 <<AWS S3 / similar>> {
-            artifact "Mídias (Fotos/Vídeos)"
-            artifact "Documentos (PDFs)"
-        }
-        node "CDN" as cdn <<Edge Locations>> {
-            note right: Cache de mídias para\ncarregamento ágil (RNF-004)
+        node "CDN" <<Edge Network>> as cdn {
+            note top: Cache de vídeos/fotos\npara performance (RNF-004)
         }
     }
 }
 
-' --- Interconexões ---
-tutorDevice -- internet
-vetDevice -- internet
-internet -- lb
+' --- Conexões e Comunicação ---
+tutorNode -- https
+vetNode -- https
+https -- lb
 
-lb -- appCluster : HTTP/JSON (REST)
+lb -- cluster : "REST API (JSON)"
+cluster -- dbPrimary : "JDBC / ACID"
+cluster -- dbReplica : "Leitura de Relatórios"
+cluster -- s3 : "Upload / Download"
 
-appCluster -- primaryDB : JDBC (Escrita/Leitura)
-appCluster -- replicaDB : JDBC (Leitura de Dashboards)
-
-appCluster -- s3 : Upload/Download (API)
-cdn -- internet : Entrega otimizada de mídias
-
-primaryDB .[#blue].> replicaDB : Replicação Síncrona
+cdn -- internet : "Entrega de mídias pesadas"
+dbPrimary ..> dbReplica : "Replicação Síncrona"
 
 @enduml
